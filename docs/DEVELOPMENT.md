@@ -11,7 +11,7 @@ record the argv/environment they received.
 
 ## Running the tests
 
-In Docker (the supported way, same as CI's image job):
+In Docker (the supported way):
 
 ```bash
 docker build --target test -t rotsy-runner-test .

@@ -1,6 +1,6 @@
 # Same narrow, defect-focused rule set as the Rotsy backend (backend/ruff.toml):
 # rules that catch real defects, not stylistic ones. Formatting is checked with
-# `ruff format --check` in CI.
+# `ruff format --check` (see docs/DEVELOPMENT.md).
 
 line-length = 120
 target-version = "py312"

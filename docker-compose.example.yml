@@ -9,8 +9,12 @@
 # (e.g. an `internal: true` network shared with the server) — see docs/OFFLINE.md.
 services:
   runner:
-    image: ghcr.io/sajed-alavi/rotsy-runner:latest
-    # or build it locally:  build: .
+    # Built from this repository (`docker build --target base -t rotsy-runner:latest .`);
+    # in an air-gapped site, `docker load` it from a saved image instead.
+    image: rotsy-runner:latest
+    build:
+      context: .
+      target: base
     restart: unless-stopped
     env_file:
       - path: .env

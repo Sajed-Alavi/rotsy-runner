@@ -1,18 +1,20 @@
 # Releasing
 
 Versioning is semantic: `src/rotsy_runner/__init__.py` holds `__version__`
-(the package reads it; so does the release workflow). `PROTOCOL_VERSION` is
+(the package and `scripts/build-release.sh` read it). `PROTOCOL_VERSION` is
 separate and changes only when the runner ⇄ server contract does — a server
 refuses registration from a runner speaking another protocol version.
 
 ## Cut a release
 
+There is no CI pipeline yet; a release is cut by hand.
+
 1. Bump `__version__`, add a `CHANGELOG.md` entry, commit.
-2. `git tag v1.0.1 && git push origin main v1.0.1`.
-3. `.github/workflows/release.yml` then: runs the tests; builds the wheel,
-   sdist and offline bundles for amd64 and arm64 with `scripts/build-release.sh`;
-   writes `SHA256SUMS`; creates the GitHub release with those files; pushes
-   `ghcr.io/sajed-alavi/rotsy-runner:<tag>` and `:latest` (amd64 + arm64).
+2. Run the checks in Docker (see [DEVELOPMENT.md](DEVELOPMENT.md#running-the-tests)).
+3. Build the artifacts as below, and `git tag v1.0.1 && git push origin main v1.0.1`.
+4. Attach `release/*` (wheel, sdist, offline bundles, `SHA256SUMS`) to the
+   GitHub release for the tag, and load or push the image wherever your
+   runners pull it from.
 
 ## Build locally
 
