@@ -212,3 +212,13 @@ async def test_scans_wait_for_a_database_swap(config):
     await asyncio.gather(scan("a", 0.05), swap(), scan("b", 0))
     assert order.index("swap") > order.index("a-end")
     assert time.monotonic() - started < 2
+
+
+async def test_a_fresh_process_reports_database_readiness_after_probing(config, client, server):
+    """`rotsy-runner status` runs in a new process with no cached probe."""
+    server.publish_standard()
+    await ToolManager(config).sync(client)
+    fresh = ToolManager(config)
+    assert fresh.ready_for("grype")[0] is False  # unknown until probed
+    await fresh.refresh_probes(force=True)
+    assert fresh.ready_for("grype") == (True, "")

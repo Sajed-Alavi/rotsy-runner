@@ -142,7 +142,11 @@ def cmd_status(args: argparse.Namespace, config: Config) -> int:
     loaded = state.load(config.state_dir)
     from .tools import ToolManager
 
-    report = ToolManager(config).report()
+    manager = ToolManager(config)
+    # A fresh process has no cached database probe; check now so `status`
+    # reports what a scan would actually find.
+    asyncio.run(manager.refresh_probes(force=True))
+    report = manager.report()
     info = {
         "version": __version__,
         "protocol_version": PROTOCOL_VERSION,
