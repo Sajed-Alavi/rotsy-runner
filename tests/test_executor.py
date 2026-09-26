@@ -103,6 +103,40 @@ async def test_cancellation_stops_the_scan(ready, server, tmp_path):
     assert job["job_uid"] not in server.completed
 
 
+async def test_scanners_run_side_by_side(ready, server, monkeypatch):
+    running = peak = 0
+    real = ready._scan_one
+
+    async def tracked(scanner, *args, **kwargs):
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        try:
+            await asyncio.sleep(0.2)
+            return await real(scanner, *args, **kwargs)
+        finally:
+            running -= 1
+
+    monkeypatch.setattr(ready, "_scan_one", tracked)
+    job = server.job()
+    assert await ready.run(job) == "completed"
+    assert peak == 2
+    # Results come back in the job's scanner order, whichever finished first.
+    assert [r["scanner"] for r in server.completed[job["job_uid"]]] == job["scanners"]
+
+
+async def test_cancellation_kills_every_running_scanner(ready, server, tmp_path):
+    (home(tmp_path) / "trivy-mode").write_text("sleep")
+    (home(tmp_path) / "grype-mode").write_text("sleep")
+    job = server.job()
+    cancel = asyncio.Event()
+    task = asyncio.create_task(ready.run(job, cancel))
+    await asyncio.sleep(0.5)
+    cancel.set()
+    # Both fake scanners sleep 30s: returning promptly means both were killed.
+    assert await asyncio.wait_for(task, 10) == "cancelled"
+
+
 async def test_server_side_cancel_arrives_through_progress(ready, server, tmp_path):
     job = server.job()
     server.cancel.add(job["job_uid"])

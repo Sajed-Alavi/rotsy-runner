@@ -36,10 +36,8 @@ from .tools import ToolManager
 
 logger = logging.getLogger(__name__)
 
+
 #: Progress window each scanner reports within, by position.
-_WINDOWS = {1: [(5, 95)], 2: [(5, 50), (50, 95)]}
-
-
 class JobCancelled(Exception):
     pass
 
@@ -122,30 +120,44 @@ class Executor:
         return "undelivered"
 
     async def _scan_all(self, job: JobAssignment, cancel: asyncio.Event) -> list[ScanOutcome]:
+        """Run the job's scanners side by side.
+
+        They are independent static reads of the same image (separate
+        binaries, databases and locks), so a job takes as long as the slower
+        scanner instead of the sum of both.
+        """
         image_ref = self.image_ref(job)
         creds = Credentials(job.target.registry.username, job.target.registry.password)
-        per_scanner = min(self._config.scan_timeout_seconds, max(30, job.timeout_seconds // len(job.scanners)))
-        outcomes: list[ScanOutcome] = []
-        for (low, high), scanner in zip(_WINDOWS[len(job.scanners)], job.scanners, strict=True):
-            await self._progress(job, low, f"{scanner}: scanning {job.target.image}", "scanning", cancel)
-            task = asyncio.create_task(self._scan_one(scanner, image_ref, creds, per_scanner))
-            waiter = asyncio.create_task(cancel.wait())
-            done, _ = await asyncio.wait({task, waiter}, return_when=asyncio.FIRST_COMPLETED)
-            if waiter in done:
-                task.cancel()  # kills the scanner process (see scanners.base.exec_scanner)
-                await asyncio.gather(task, return_exceptions=True)
-                raise JobCancelled()
-            waiter.cancel()
-            outcome = task.result()
-            outcomes.append(outcome)
-            await self._progress(
-                job,
-                high,
-                f"{scanner}: {'done' if outcome.ok else 'failed'} — {len(outcome.vulnerabilities)} finding(s)",
-                "scanned",
-                cancel,
-            )
-        return outcomes
+        timeout = min(self._config.scan_timeout_seconds, max(30, job.timeout_seconds))
+        await self._progress(job, 5, f"{', '.join(job.scanners)}: scanning {job.target.image}", "scanning", cancel)
+        tasks = {asyncio.create_task(self._scan_one(s, image_ref, creds, timeout)): s for s in job.scanners}
+        waiter = asyncio.create_task(cancel.wait())
+        outcomes: dict[str, ScanOutcome] = {}
+        pending = set(tasks)
+        try:
+            while pending:
+                done, pending = await asyncio.wait(pending | {waiter}, return_when=asyncio.FIRST_COMPLETED)
+                if waiter in done:
+                    raise JobCancelled()
+                pending.discard(waiter)
+                for task in done:
+                    scanner = tasks[task]
+                    outcome = outcomes[scanner] = task.result()
+                    await self._progress(
+                        job,
+                        5 + 90 * len(outcomes) // len(tasks),
+                        f"{scanner}: {'done' if outcome.ok else 'failed'} — {len(outcome.vulnerabilities)} finding(s)",
+                        "scanned",
+                        cancel,
+                    )
+        finally:
+            # Cancelling a scan task kills its scanner process group
+            # (see scanners.base.exec_scanner).
+            for task in (waiter, *tasks):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(waiter, *tasks, return_exceptions=True)
+        return [outcomes[s] for s in job.scanners]
 
     async def _scan_one(self, scanner: str, image_ref: str, creds: Credentials, timeout: int) -> ScanOutcome:
         record = self._tools.record(scanner)
