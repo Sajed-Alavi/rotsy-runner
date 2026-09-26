@@ -1,0 +1,57 @@
+# systemd unit for rotsy-runner installed with packaging/install.sh.
+#
+#   sudo systemctl enable --now rotsy-runner
+#   journalctl -u rotsy-runner -f
+#
+# Register first (as the service user, so the credential file is owned by it):
+#   sudo -u rotsy-runner /opt/rotsy-runner/bin/rotsy-runner register --server https://rotsy.example.com
+[Unit]
+Description=Rotsy runner (static container-image scanning agent)
+Documentation=https://github.com/sajed-alavi/rotsy-runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rotsy-runner
+Group=rotsy-runner
+Environment=ROTSY_RUNNER_DATA_DIR=/var/lib/rotsy-runner
+EnvironmentFile=-/etc/rotsy-runner/env
+ExecStart=/opt/rotsy-runner/bin/rotsy-runner run
+Restart=on-failure
+RestartSec=10
+# Exit 3 = the server rejected the credential (runner deleted or reset).
+# Restarting cannot fix that; re-register instead of looping.
+RestartPreventExitStatus=3
+# Let running scans finish and hand back the rest (ROTSY_RUNNER_SHUTDOWN_GRACE_SECONDS, default 60).
+TimeoutStopSec=90
+KillSignal=SIGTERM
+
+# --- hardening: the runner needs its data dir and the network, nothing else ---
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/rotsy-runner
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+UMask=0077
+# Optional: confine the network to the Rotsy server only, e.g.
+#   IPAddressDeny=any
+#   IPAddressAllow=10.0.0.10/32
+
+[Install]
+WantedBy=multi-user.target

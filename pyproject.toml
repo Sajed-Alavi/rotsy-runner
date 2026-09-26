@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=78.1.1", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rotsy-runner"
+dynamic = ["version"]
+description = "Execution agent for Rotsy: runs static container-image scans (Trivy, Grype) on behalf of a Rotsy server, talking to nothing but that server."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [{ name = "Sajed Alavi" }]
+# Pinned in requirements.txt for reproducible images; ranges here so the wheel
+# installs next to other software on a host.
+dependencies = [
+    "httpx>=0.28,<0.29",
+    "pydantic>=2.11,<3",
+]
+
+[project.scripts]
+rotsy-runner = "rotsy_runner.cli:main"
+
+[project.urls]
+Source = "https://github.com/sajed-alavi/rotsy-runner"
+Server = "https://github.com/sajed-alavi/rotsy"
+
+[tool.setuptools.dynamic]
+version = { attr = "rotsy_runner.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

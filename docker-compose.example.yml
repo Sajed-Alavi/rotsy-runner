@@ -1,0 +1,30 @@
+# Run rotsy-runner with Docker Compose.
+#
+#   cp docker-compose.example.yml docker-compose.yml
+#   docker compose run --rm runner register --server https://rotsy.example.com
+#   docker compose up -d
+#
+# The runner needs a route to the Rotsy server and nothing else. To enforce
+# that at the network level, attach it only to a network that reaches Rotsy
+# (e.g. an `internal: true` network shared with the server) — see docs/OFFLINE.md.
+services:
+  runner:
+    image: ghcr.io/sajed-alavi/rotsy-runner:latest
+    # or build it locally:  build: .
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - rotsy-runner-data:/var/lib/rotsy-runner
+    # No Docker socket, no privileges: scans are static registry reads.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 90s
+
+volumes:
+  rotsy-runner-data:

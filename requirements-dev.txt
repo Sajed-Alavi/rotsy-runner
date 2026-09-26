@@ -1,0 +1,16 @@
+# Test/CI-only dependencies. Install alongside requirements.txt:
+#   pip install -r requirements.txt -r requirements-dev.txt
+-r requirements.txt
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-cov==7.0.0
+
+# Dependency CVE audit. Run after any change to requirements.txt:
+#   pip-audit -r requirements.txt
+pip-audit==2.10.1
+
+# Linting — same narrow, defect-focused rule set as the Rotsy backend.
+ruff==0.14.2
+
+# Building the wheel/sdist for releases (scripts/build-release.sh).
+build==1.3.0

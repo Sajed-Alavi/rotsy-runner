@@ -1,0 +1,28 @@
+# Same narrow, defect-focused rule set as the Rotsy backend (backend/ruff.toml):
+# rules that catch real defects, not stylistic ones. Formatting is checked with
+# `ruff format --check` in CI.
+
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = [
+    "F",     # pyflakes — undefined names, unused imports
+    "E9",    # syntax/IO errors
+    "B",     # bugbear
+    "ASYNC1",# blocking calls inside async functions
+    "S102",  # exec()
+    "S103",  # overly permissive file permissions
+    "S108",  # hardcoded temp paths
+    "S602",  # subprocess with shell=True — never: scanners get an argv, not a shell
+    "S605",  # os.system
+    "T20",   # leftover print() — the CLI uses sys.stdout.write deliberately
+    "I",     # import sorting
+]
+ignore = ["ASYNC109"]
+
+[lint.per-file-ignores]
+"tests/**" = ["S101", "B011", "S108"]
+
+[format]
+quote-style = "double"

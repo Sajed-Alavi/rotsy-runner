@@ -1,0 +1,8 @@
+# rotsy-runner runtime dependencies — pinned for reproducible builds.
+#
+# Deliberately tiny: an HTTP client and a validation library. Everything the
+# runner does beyond talking to the Rotsy server is done by the scanner
+# binaries the server delivers. Match the pins the Rotsy server uses where the
+# two share a library, so one CVE review covers both.
+httpx==0.28.1
+pydantic==2.13.4
