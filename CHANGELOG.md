@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- A job's scanners run side by side instead of one after the other: a scan
+  now takes as long as the slower scanner. Each scanner gets the job's whole
+  timeout (capped by `ROTSY_RUNNER_SCAN_TIMEOUT_SECONDS`), and a cancellation kills
+  every running scanner.
+- CI and release workflows removed for now; releases are cut by hand (see
+  docs/RELEASING.md).
+
 ## 1.0.0
 
 First release: the execution side of Rotsy, extracted from the Rotsy server.

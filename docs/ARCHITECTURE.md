@@ -69,8 +69,9 @@ Failures leave the working version in place and back off exponentially.
 **A scan.** A worker long-polls `POST /jobs/claim`. The assignment names the
 image (`name:tag`), the scanners, a lease and a registry credential valid only
 for this job. The executor validates all of it, checks the tools are ready,
-and runs each scanner against `<server-host>/<name>:<tag>` — the server's
-registry proxy — with the credential in the scanner's environment. Progress
+and runs the scanners side by side (a scan takes as long as the slower one)
+against `<server-host>/<name>:<tag>` — the server's registry proxy — with the
+credential in the scanner's environment. Progress
 reports renew the lease and are how a cancellation arrives. The structured
 result (findings per scanner, versions, timings, redacted diagnostics) is
 posted to `/complete`; the server writes the reports, closes its ledger and
