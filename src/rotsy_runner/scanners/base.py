@@ -108,15 +108,28 @@ async def exec_scanner(
     holds for cancellation — a cancelled job kills its scanner here, then
     re-raises.
     """
-    proc = await asyncio.create_subprocess_exec(
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=env,
-        # Its own process group, so a kill reaches anything it spawned too —
-        # a surviving grandchild would hold the pipes open and the job with them.
-        start_new_session=True,
+    spawn = asyncio.ensure_future(
+        asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+            # Its own process group, so a kill reaches anything it spawned too —
+            # a surviving grandchild would hold the pipes open and the job with them.
+            start_new_session=True,
+        )
     )
+    try:
+        # Shielded: a cancel landing mid-spawn would make asyncio kill only the
+        # direct child, leaving its children holding the pipes (and the job).
+        proc = await asyncio.shield(spawn)
+    except asyncio.CancelledError:
+        try:
+            proc = await spawn
+        except Exception:  # noqa: BLE001 - it never started; nothing to kill
+            raise asyncio.CancelledError() from None
+        await kill_tree(proc)
+        raise
     try:
         async with asyncio.timeout(timeout):
             stdout, stderr = await proc.communicate()

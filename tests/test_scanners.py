@@ -213,3 +213,27 @@ async def test_cancellation_kills_the_scanner(tmp_path):
         await task
     await asyncio.sleep(2.5)
     assert not marker.exists()
+
+
+async def test_a_cancel_during_spawn_still_kills_the_whole_process_group(tmp_path, monkeypatch):
+    """Cancelled while the process is being created: it and its children must
+    still be killed, or they outlive the job (and can hold its pipes open)."""
+    marker = tmp_path / "survived"
+    exe = _script(tmp_path, f"(sleep 2; touch {marker}) &\nsleep 30\n")
+    real_spawn = asyncio.create_subprocess_exec
+    spawned = asyncio.Event()
+
+    async def slow_spawn(*args, **kwargs):
+        proc = await real_spawn(*args, **kwargs)
+        spawned.set()
+        await asyncio.sleep(0.5)  # the process is running; creation has not returned yet
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", slow_spawn)
+    task = asyncio.create_task(base.exec_scanner([str(exe)], base.scanner_env({}), 60))
+    await asyncio.wait_for(spawned.wait(), 5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, 15)
+    await asyncio.sleep(2.5)
+    assert not marker.exists()
