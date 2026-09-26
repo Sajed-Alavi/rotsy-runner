@@ -239,7 +239,10 @@ class Agent:
 
     def apply(self, kind: str, job_uid: str | None = None, reason: str = "") -> None:
         if kind == "SYNC_TOOLS":
-            self.telemetry.event("command.sync_tools", f"tool sync requested: {reason or 'by the server'}")
+            # The server repeats SYNC_TOOLS on every heartbeat until the tools
+            # match; only a request that starts a sync is worth an event.
+            if not (self._sync_requested.is_set() or self.tools.syncing):
+                self.telemetry.event("command.sync_tools", f"tool sync requested: {reason or 'by the server'}")
             self._sync_requested.set()
         elif kind == "CANCEL_JOB" and job_uid:
             running = self._running.get(job_uid)

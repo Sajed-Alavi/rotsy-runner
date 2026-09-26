@@ -156,3 +156,10 @@ async def test_a_job_is_reported_as_events_and_counters(config, server):
     metrics = [h["metrics"] for h in server.heartbeats if "metrics" in h]
     assert metrics[-1]["jobs_completed"] == 1
     assert set(metrics[-1]["scanners"]) == {"trivy", "grype"}
+
+
+async def test_a_repeated_sync_request_is_one_event(config, server):
+    agent = _agent(config, server)
+    for _ in range(3):
+        agent.apply("SYNC_TOOLS", reason="installed tools differ from the desired set")
+    assert [e["kind"] for e in agent.telemetry.drain_events()] == ["command.sync_tools"]
