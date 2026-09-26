@@ -75,6 +75,9 @@ class HeartbeatResponse(_Lenient):
     heartbeat_interval_seconds: int = Field(default=15, ge=1, le=3600)
     desired_tools_revision: str = ""
     commands: list[Command] = Field(default_factory=list)
+    #: Optional heartbeat fields this server accepts ("metrics", "events");
+    #: absent on servers that predate them.
+    features: list[str] = Field(default_factory=list, max_length=32)
 
     def known_commands(self) -> list[Command]:
         known = []

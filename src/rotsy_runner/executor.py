@@ -32,6 +32,7 @@ from .logs import register_secret
 from .protocol import MAX_FINDINGS, JobAssignment, clean_finding, parse_assignment
 from .scanners import grype, trivy
 from .scanners.base import Credentials, ScanOutcome, assert_static_ref
+from .telemetry import Telemetry
 from .tools import ToolManager
 
 logger = logging.getLogger(__name__)
@@ -46,10 +47,13 @@ class Executor:
     #: Base of the exponential delay between result-delivery retries (seconds).
     retry_base: float = 2.0
 
-    def __init__(self, config: Config, client: ServerClient, tools: ToolManager) -> None:
+    def __init__(
+        self, config: Config, client: ServerClient, tools: ToolManager, telemetry: Telemetry | None = None
+    ) -> None:
         self._config = config
         self._client = client
         self._tools = tools
+        self.telemetry = telemetry or Telemetry(config.data_dir)
         parts = urlsplit(client.server_url)
         #: host[:port] of the Rotsy server — where the registry proxy lives.
         self.registry_host = parts.netloc
@@ -70,6 +74,8 @@ class Executor:
         job_uid = str(raw.get("job_uid") or "")[:64] if isinstance(raw, dict) else ""
         if job is None:
             logger.warning("Refusing malformed job %s: %s", job_uid or "?", reason)
+            self.telemetry.job_finished("refused")
+            self.telemetry.event("job.refused", f"refused a malformed job: {reason}", level="warning", job_uid=job_uid)
             if job_uid:
                 await self._report_failure(job_uid, f"runner refused a malformed job: {reason}", retryable=False)
             return "refused"
@@ -82,22 +88,45 @@ class Executor:
                     "Job %s needs %s, which is not ready here (%s); handing it back", job.job_uid, scanner, why
                 )
                 await self._report_failure(job.job_uid, f"{scanner} is not ready on this runner: {why}", retryable=True)
+                self.telemetry.job_finished("handed_back")
+                self.telemetry.event(
+                    "job.handed_back",
+                    f"{job.target.image}: {scanner} is not ready here ({why})",
+                    level="warning",
+                    job_uid=job.job_uid,
+                )
                 return "handed-back"
 
+        self.telemetry.event(
+            "job.started", f"scanning {job.target.image} with {', '.join(job.scanners)}", job_uid=job.job_uid
+        )
         keepalive = asyncio.create_task(self._keepalive(job, cancel))
         try:
             outcomes = await self._scan_all(job, cancel)
         except JobCancelled:
             await self._report_failure(job.job_uid, "cancelled", retryable=False)
+            self.telemetry.job_finished("cancelled")
+            self.telemetry.event(
+                "job.cancelled", f"{job.target.image}: cancelled", level="warning", job_uid=job.job_uid
+            )
             return "cancelled"
         except JobGone:
             logger.warning("Job %s was taken away by the server; dropping it", job.job_uid)
+            self.telemetry.event(
+                "job.dropped", f"{job.target.image}: taken away by the server", level="warning", job_uid=job.job_uid
+            )
             return "dropped"
         finally:
             keepalive.cancel()
             await asyncio.gather(keepalive, return_exceptions=True)
             self._last.pop(job.job_uid, None)
 
+        for o in outcomes:
+            self.telemetry.scan_result(o.scanner, o.ok, o.duration_ms, len(o.vulnerabilities))
+        summary = ", ".join(
+            f"{o.scanner} {'ok' if o.ok else 'failed'} ({len(o.vulnerabilities)} findings, {o.duration_ms / 1000:.1f}s)"
+            for o in outcomes
+        )
         results = [self._result(o) for o in outcomes]
         for attempt in range(1, 6):
             try:
@@ -107,16 +136,40 @@ class Executor:
                     job.job_uid,
                     ", ".join(f"{o.scanner}={'ok' if o.ok else 'failed'}" for o in outcomes),
                 )
+                self.telemetry.job_finished("completed")
+                self.telemetry.event(
+                    "job.completed",
+                    f"{job.target.image}: {summary}",
+                    level="info" if all(o.ok for o in outcomes) else "warning",
+                    job_uid=job.job_uid,
+                )
                 return "completed"
             except JobGone:
                 logger.warning("Job %s is no longer ours; its result was discarded by the server", job.job_uid)
+                self.telemetry.event(
+                    "job.dropped",
+                    f"{job.target.image}: result discarded by the server",
+                    level="warning",
+                    job_uid=job.job_uid,
+                )
                 return "dropped"
             except ServerError as exc:
                 logger.warning("Could not deliver job %s result (attempt %d/5): %s", job.job_uid, attempt, exc)
                 await asyncio.sleep(min(30.0, self.retry_base**attempt))
             except ClientError as exc:
                 logger.error("Server refused job %s result: %s", job.job_uid, exc)
+                self.telemetry.job_finished("failed")
+                self.telemetry.event(
+                    "job.rejected",
+                    f"{job.target.image}: server refused the result ({exc})",
+                    level="error",
+                    job_uid=job.job_uid,
+                )
                 return "rejected"
+        self.telemetry.job_finished("failed")
+        self.telemetry.event(
+            "job.undelivered", f"{job.target.image}: result could not be delivered", level="error", job_uid=job.job_uid
+        )
         return "undelivered"
 
     async def _scan_all(self, job: JobAssignment, cancel: asyncio.Event) -> list[ScanOutcome]:

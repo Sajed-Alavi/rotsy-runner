@@ -12,6 +12,11 @@ Three cooperating loops on one event loop:
 * **tool sync** — on start and on ``SYNC_TOOLS``, reconciles installed tools
   with the server's manifest (one sync at a time).
 
+Every heartbeat also carries a metrics snapshot and the events since the last
+one (see :mod:`~rotsy_runner.telemetry`) once the server has advertised that it
+accepts them — the server cannot reach a runner, so this is how the Runners
+page learns what the runner is doing.
+
 Failure handling:
 
 * network errors and 5xx: exponential backoff with jitter (1s → 60s), then
@@ -39,6 +44,7 @@ from .config import Config
 from .executor import Executor
 from .logs import register_secret
 from .state import Identity
+from .telemetry import Telemetry
 from .tools import ToolManager
 
 logger = logging.getLogger(__name__)
@@ -78,7 +84,10 @@ class Agent:
         self.identity = identity
         self.client = client or ServerClient(config, identity.server_url, credential)
         self.tools = tools or ToolManager(config)
-        self.executor = Executor(config, self.client, self.tools)
+        self.telemetry = Telemetry(config.data_dir)
+        self.executor = Executor(config, self.client, self.tools, self.telemetry)
+        #: What the server said it accepts beyond the base protocol ("metrics", "events").
+        self.server_features: set[str] = set()
         self.heartbeat_interval = 15.0
         self.enabled = True
         self.exit_code = EXIT_OK
@@ -112,12 +121,14 @@ class Agent:
             "tools": self.tools.report(),
             "running_jobs": list(self._running)[:64],
             "last_error": self.last_error[:2000],
+            **({"metrics": self.telemetry.snapshot(len(self._running))} if "metrics" in self.server_features else {}),
         }
 
     # --- lifecycle ---------------------------------------------------------------
     def request_stop(self, reason: str = "") -> None:
         if not self._stopping.is_set():
             logger.info("Stopping%s", f": {reason}" if reason else "")
+            self.telemetry.event("agent.stopping", f"stopping{': ' + reason if reason else ''}", level="warning")
             self._stopping.set()
 
     def _install_signal_handlers(self) -> None:
@@ -137,6 +148,9 @@ class Agent:
             self.identity.runner_uid,
             self.identity.server_url,
         )
+        self.telemetry.event(
+            "agent.started", f"rotsy-runner {__version__} started (concurrency {self.config.concurrency})"
+        )
         self._sync_requested.set()  # reconcile tools once at start
         tasks = [
             asyncio.create_task(self._heartbeat_loop(), name="heartbeat"),
@@ -150,7 +164,7 @@ class Agent:
         await asyncio.gather(*tasks, return_exceptions=True)
         if self.exit_code != EXIT_AUTH:
             try:
-                await self.client.heartbeat(self.heartbeat_body())
+                await self._send_heartbeat()
             except ClientError:
                 pass
         await self.client.aclose()
@@ -181,25 +195,62 @@ class Agent:
         self.request_stop("credential rejected")
 
     # --- heartbeat + commands ---------------------------------------------------
+    async def _send_heartbeat(self):
+        """One heartbeat with the metrics snapshot and pending events.
+
+        Events the server did not receive are put back for the next one.
+        """
+        body = self.heartbeat_body()
+        events = self.telemetry.drain_events() if "events" in self.server_features else []
+        if events:
+            body["events"] = events
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        try:
+            resp = await self.client.heartbeat(body)
+        except ClientError:
+            self.telemetry.restore_events(events)
+            if self.telemetry.heartbeat_failures == 0:
+                self.telemetry.event("connection.lost", "heartbeat to the server failed", level="warning")
+            self.telemetry.heartbeat_failed()
+            raise
+        failures = self.telemetry.heartbeat_failures
+        self.telemetry.heartbeat_ok((loop.time() - started) * 1000)
+        if failures:
+            self.telemetry.event("connection.restored", f"reconnected after {failures} failed heartbeat(s)")
+        self.server_features = set(resp.features)
+        return resp
+
     async def heartbeat_once(self) -> None:
         await self.tools.refresh_probes()
-        resp = await self.client.heartbeat(self.heartbeat_body())
+        await asyncio.to_thread(self.telemetry.system.refresh_dir_sizes)
+        resp = await self._send_heartbeat()
         self.heartbeat_interval = float(resp.heartbeat_interval_seconds)
         was_enabled, self.enabled = self.enabled, resp.runner_status == "active"
         if was_enabled != self.enabled:
             logger.warning("Runner %s on the server", "enabled" if self.enabled else "DISABLED")
+            self.telemetry.event(
+                "runner.enabled" if self.enabled else "runner.disabled",
+                "enabled on the server; taking work" if self.enabled else "disabled on the server; taking no work",
+                level="info" if self.enabled else "warning",
+            )
         for command in resp.known_commands():
             self.apply(command.type, command.job_uid, command.reason)
 
     def apply(self, kind: str, job_uid: str | None = None, reason: str = "") -> None:
         if kind == "SYNC_TOOLS":
+            self.telemetry.event("command.sync_tools", f"tool sync requested: {reason or 'by the server'}")
             self._sync_requested.set()
         elif kind == "CANCEL_JOB" and job_uid:
             running = self._running.get(job_uid)
             if running is not None:
                 logger.info("Cancelling job %s: %s", job_uid, reason or "requested by the server")
+                self.telemetry.event(
+                    "command.cancel_job", f"cancelling: {reason or 'requested by the server'}", job_uid=job_uid
+                )
                 running[1].set()
         elif kind == "SHUTDOWN":
+            self.telemetry.event("command.shutdown", f"shutdown requested: {reason or 'by the server'}")
             self.request_stop(reason or "requested by the server")
 
     async def _heartbeat_loop(self) -> None:
@@ -227,10 +278,12 @@ class Agent:
         while not self._stopping.is_set():
             await self._sync_requested.wait()
             self._sync_requested.clear()
+            before = {t["name"]: t for t in self.tools.report()}
             try:
                 await self.tools.sync(self.client)
                 backoff.reset()
                 self._first_sync_done.set()
+                self._report_tool_changes(before)
                 # Tell the server straight away rather than at the next tick.
                 await self.heartbeat_once()
             except AuthError as exc:
@@ -241,10 +294,25 @@ class Agent:
                 logger.info("Runner disabled; skipping tool sync")
             except ClientError as exc:
                 self._first_sync_done.set()
+                self.telemetry.sync_done(ok=False)
                 delay = backoff.next()
+                self.telemetry.event("tool.sync_failed", f"tool sync failed: {exc}", level="error")
                 logger.warning("Tool sync failed (%s); retrying in %.0fs", exc, delay)
                 await asyncio.sleep(delay)
                 self._sync_requested.set()
+
+    def _report_tool_changes(self, before: dict[str, dict[str, Any]]) -> None:
+        after = self.tools.report()
+        failed = False
+        for tool in after:
+            old = before.get(tool["name"], {})
+            if tool["status"] == "installed" and tool["version"] != old.get("version"):
+                was = f" (was {old['version']})" if old.get("version") else ""
+                self.telemetry.event("tool.installed", f"{tool['name']} {tool['version']} installed{was}")
+            if tool["error"] and tool["error"] != old.get("error"):
+                failed = True
+                self.telemetry.event("tool.failed", f"{tool['name']}: {tool['error']}"[:500], level="error")
+        self.telemetry.sync_done(ok=not failed)
 
     # --- work -------------------------------------------------------------------
     async def _worker(self, index: int) -> None:
@@ -287,8 +355,12 @@ class Agent:
                 if not task.done():
                     cancel.set()
                 raise
-            except Exception:  # noqa: BLE001 - one job's crash must not stop the worker
+            except Exception as exc:  # noqa: BLE001 - one job's crash must not stop the worker
                 logger.exception("Job %s crashed", job_uid)
+                self.telemetry.job_finished("failed")
+                self.telemetry.event(
+                    "job.crashed", f"runner error: {type(exc).__name__}", level="error", job_uid=job_uid
+                )
                 try:
                     await self.client.fail(job_uid, "runner error while executing the job", retryable=True)
                 except ClientError:

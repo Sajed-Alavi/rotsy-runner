@@ -156,6 +156,7 @@ class FakeServer:
     cancel: set[str] = field(default_factory=set)
     claimed: dict[str, dict] = field(default_factory=dict)
     fail_next: int = 0  # answer this many requests with 503
+    features: list[str] = field(default_factory=list)  # optional heartbeat fields accepted
     corrupt_downloads: bool = False
 
     def publish(
@@ -238,6 +239,7 @@ class FakeServer:
                     "heartbeat_interval_seconds": 1,
                     "desired_tools_revision": "r1",
                     "commands": commands,
+                    **({"features": self.features} if self.features else {}),
                 },
             )
         if not self.enabled:
