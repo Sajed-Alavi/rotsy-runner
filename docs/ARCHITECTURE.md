@@ -33,6 +33,7 @@ src/rotsy_runner/
   protocol.py     wire contracts; strict for jobs, lenient for everything else
   agent.py        heartbeat loop, tool-sync loop, N workers, commands, shutdown
   executor.py     validate → check tools → scan → progress → result
+  telemetry.py    metrics (/proc, cgroup v2) and the event buffer pushed on heartbeats
   tools/
     specs.py      what each tool is and how it installs  ← the extension point
     manager.py    reconcile with the server manifest; verified, atomic installs

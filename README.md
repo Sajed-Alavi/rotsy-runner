@@ -10,7 +10,10 @@ Rotsy server, and **talks to nothing but that server**:
   — it holds no Nexus/registry credential and needs no route to the registry;
 * it reports progress and results **to the server**, which stores them and
   decides whether to notify anyone (Telegram lives on the server; the runner
-  knows nothing about it).
+  knows nothing about it);
+* it **pushes its own health** — CPU, memory, disk, network, scan timings and
+  an activity log — to the server on every heartbeat, which is where the
+  Runners dashboard and Prometheus get it. Nothing connects in to a runner.
 
 So a runner can live on a host with **no Internet access at all**.
 

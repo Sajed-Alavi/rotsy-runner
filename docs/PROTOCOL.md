@@ -80,6 +80,40 @@ usable (a database the scanner can load). Unknown tool names are ignored.
 Commands are a closed set: `SYNC_TOOLS`, `CANCEL_JOB`, `SHUTDOWN`. The runner
 ignores (and logs) anything else. No command carries a program to run.
 
+### Metrics and events (optional)
+
+A server that accepts them lists them in every heartbeat response:
+`"features": ["metrics", "events"]`. Only then does the runner add two fields
+to its heartbeats — so a newer runner still works against an older server,
+whose schema refuses unknown fields:
+
+```json
+{"metrics": {"cpu_percent": 12.5, "cpu_cores": 2.0, "cpu_scope": "cgroup",
+             "load_1": 0.4, "load_5": 0.3, "load_15": 0.2,
+             "memory_used_bytes": 536870912, "memory_total_bytes": 2147483648, "memory_scope": "cgroup",
+             "disk_used_bytes": 10737418240, "disk_total_bytes": 42949672960,
+             "tools_bytes": 81788928, "cache_bytes": 2684354560,
+             "net_rx_bps": 1500.0, "net_tx_bps": 300.0, "process_rss_bytes": 83886080,
+             "host_uptime_seconds": 86400, "uptime_seconds": 3600,
+             "jobs_running": 1, "jobs_completed": 7, "jobs_failed": 0, "jobs_cancelled": 0, "jobs_handed_back": 0,
+             "scanners": {"trivy": {"ok": 7, "failed": 0, "last_duration_ms": 2100,
+                                    "avg_duration_ms": 1900, "last_findings": 12}},
+             "heartbeat_rtt_ms": 4.2, "heartbeat_failures": 0, "reconnects": 0,
+             "tool_syncs_ok": 1, "tool_syncs_failed": 0, "last_tool_sync_at": "2026-09-27T09:00:00Z",
+             "events_dropped": 0},
+ "events": [{"at": "2026-09-27T09:00:03Z", "level": "info", "kind": "job.completed",
+             "message": "team/app:1.0: trivy ok (12 findings, 2.1s), grype ok (9 findings, 7.3s)",
+             "job_uid": "…"}]}
+```
+
+Every metric is optional (`null` when unreadable); the server ignores metric
+and event fields it does not know and refuses out-of-range values. `level` is
+`info | warning | error`; `kind` matches `^[a-z][a-z0-9_.]{0,47}$`; at most
+200 events per heartbeat (the runner sends up to 100 and keeps a 500-event
+buffer). Events a failed heartbeat did not deliver are sent with the next one.
+The server files an event dated in the future or older than its retention as
+"now".
+
 ## Tools
 
 `GET /tools/desired` → the manifest for *this runner's* platform:

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Telemetry.** Every heartbeat carries a metrics snapshot — CPU and memory
+  (the container's own via cgroup v2, else the host's), disk, network, load,
+  process memory, job counters, per-scanner success and timings, heartbeat
+  round trip, reconnects, tool syncs — and the events since the last one
+  (scans, tool installs and failures, lost/restored connections, commands).
+  Sent only to a server that advertises `features: ["metrics", "events"]`;
+  undelivered events are retried with the next heartbeat. No new dependency.
+- A cancel that lands while a scanner is still being spawned now kills its
+  whole process group (it could previously leave the scanner's children
+  holding the job open).
 - A job's scanners run side by side instead of one after the other: a scan
   now takes as long as the slower scanner. Each scanner gets the job's whole
   timeout (capped by `ROTSY_RUNNER_SCAN_TIMEOUT_SECONDS`), and a cancellation kills
