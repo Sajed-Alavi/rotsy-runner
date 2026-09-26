@@ -171,7 +171,10 @@ class ToolManager:
 
             try:
                 proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
-                    [str(grype), "db", "status"], capture_output=True, text=True, timeout=60,
+                    [str(grype), "db", "status"],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
                     env=scanner_env(grype_db_env(db_dir)),
                 )
                 output = f"{proc.stdout}\n{proc.stderr}"
@@ -210,11 +213,17 @@ class ToolManager:
             status = record.status
             if status == "failed" and ready:
                 status = "installed"  # the previous version still works; the error says what did not
-            out.append({
-                "name": name, "kind": record.kind, "version": record.version[:64], "sha256": record.sha256,
-                "status": status, "ready": bool(ready and status == "installed"),
-                "error": (record.error or ("" if ready else why))[:2000],
-            })
+            out.append(
+                {
+                    "name": name,
+                    "kind": record.kind,
+                    "version": record.version[:64],
+                    "sha256": record.sha256,
+                    "status": status,
+                    "ready": bool(ready and status == "installed"),
+                    "error": (record.error or ("" if ready else why))[:2000],
+                }
+            )
         return out
 
     # --- sync -------------------------------------------------------------------------
@@ -240,14 +249,14 @@ class ToolManager:
             if not artifact.available or not artifact.download_path or not artifact.sha256:
                 summary[name] = "unavailable"
                 if record is None:
-                    self._inventory[name] = InstalledTool(name=name, kind=spec.kind, status="missing",
-                                                          error=artifact.reason[:500])
+                    self._inventory[name] = InstalledTool(
+                        name=name, kind=spec.kind, status="missing", error=artifact.reason[:500]
+                    )
                 continue
             if record and record.sha256 == artifact.sha256 and record.status == "installed" and self._present(name)[0]:
                 summary[name] = "current"
                 continue
-            if (record and record.failed_sha256 == artifact.sha256 and not force
-                    and time.time() < record.next_retry):
+            if record and record.failed_sha256 == artifact.sha256 and not force and time.time() < record.next_retry:
                 summary[name] = "backoff"
                 continue
             if spec.installer == "binary" and await self._reactivate(spec, artifact):
@@ -268,8 +277,9 @@ class ToolManager:
         download = self._config.downloads_dir / f"{artifact.sha256[:16]}-{_safe_name(artifact.filename or spec.name)}"
         logger.info("Installing %s %s (sha256 %s…)", spec.name, artifact.version, artifact.sha256[:12])
         try:
-            await client.download(artifact.download_path, download, expected_sha256=artifact.sha256,
-                                  expected_size=artifact.size_bytes)
+            await client.download(
+                artifact.download_path, download, expected_sha256=artifact.sha256, expected_size=artifact.size_bytes
+            )
             path = await self._install(spec, artifact, download)
         except (ClientError, InstallError, OSError, tarfile.TarError) as exc:
             reason = f"install of {spec.name} {artifact.version} failed: {exc}"
@@ -278,7 +288,9 @@ class ToolManager:
             restored.status = "installed" if restored.sha256 and self._present_record(restored) else "failed"
             restored.error = reason[:2000]
             restored.failed_sha256 = artifact.sha256
-            restored.failures = (before.get("failures", 0) or 0) + 1 if before.get("failed_sha256") == artifact.sha256 else 1
+            restored.failures = (
+                (before.get("failures", 0) or 0) + 1 if before.get("failed_sha256") == artifact.sha256 else 1
+            )
             restored.next_retry = time.time() + min(_BACKOFF_MAX, 30.0 * (2 ** (restored.failures - 1)))
             self._inventory[spec.name] = restored
             self._save()
@@ -287,8 +299,14 @@ class ToolManager:
             download.unlink(missing_ok=True)
         previous = {k: before[k] for k in ("version", "sha256", "path")} if before.get("sha256") else None
         self._inventory[spec.name] = InstalledTool(
-            name=spec.name, kind=spec.kind, version=artifact.version, sha256=artifact.sha256, status="installed",
-            path=str(path), installed_at=time.time(), previous=previous,
+            name=spec.name,
+            kind=spec.kind,
+            version=artifact.version,
+            sha256=artifact.sha256,
+            status="installed",
+            path=str(path),
+            installed_at=time.time(),
+            previous=previous,
         )
         self._save()
         logger.info("Installed %s %s", spec.name, artifact.version)
@@ -315,8 +333,14 @@ class ToolManager:
         previous = {"version": record.version, "sha256": record.sha256, "path": record.path} if record else None
         self._switch_current(spec.name, version_dir)
         self._inventory[spec.name] = InstalledTool(
-            name=spec.name, kind=spec.kind, version=artifact.version, sha256=artifact.sha256, status="installed",
-            path=str(exe), installed_at=time.time(), previous=previous,
+            name=spec.name,
+            kind=spec.kind,
+            version=artifact.version,
+            sha256=artifact.sha256,
+            status="installed",
+            path=str(exe),
+            installed_at=time.time(),
+            previous=previous,
         )
         logger.info("Re-activated %s %s from disk", spec.name, artifact.version)
         return True
@@ -372,8 +396,12 @@ class ToolManager:
         """Run the new binary once; it must work and be the version promised."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                str(exe), *spec.version_args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-                env=scanner_env({}), start_new_session=True,
+                str(exe),
+                *spec.version_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                env=scanner_env({}),
+                start_new_session=True,
             )
             try:
                 async with asyncio.timeout(60):
@@ -414,8 +442,13 @@ class ToolManager:
         try:
             env = scanner_env(grype_db_env(staging))
             proc = await asyncio.create_subprocess_exec(
-                str(grype), "db", "import", str(archive),
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env,
+                str(grype),
+                "db",
+                "import",
+                str(archive),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                env=env,
                 start_new_session=True,
             )
             try:
@@ -428,8 +461,9 @@ class ToolManager:
                 await kill_tree(proc)
                 raise
             if proc.returncode != 0:
-                raise InstallError(f"grype db import exited {proc.returncode}: "
-                                   f"{out.decode(errors='replace').strip()[-300:]}")
+                raise InstallError(
+                    f"grype db import exited {proc.returncode}: {out.decode(errors='replace').strip()[-300:]}"
+                )
             ok, why = await asyncio.to_thread(self._grype_db_usable, staging, fresh=True)
             if not ok:
                 raise InstallError(f"imported grype database is not usable: {why}")

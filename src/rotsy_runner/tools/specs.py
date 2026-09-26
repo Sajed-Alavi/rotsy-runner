@@ -38,10 +38,18 @@ class ToolSpec:
 SPECS: dict[str, ToolSpec] = {
     "trivy": ToolSpec("trivy", BINARY, "trivy", "binary", executable="trivy", version_args=("--version",)),
     "grype": ToolSpec("grype", BINARY, "grype", "binary", executable="grype", version_args=("version",)),
-    "trivy-db": ToolSpec("trivy-db", DATABASE, "trivy", "trivy-db",
-                         required_files=("trivy.db", "metadata.json"), target_subdir="db"),
-    "trivy-java-db": ToolSpec("trivy-java-db", DATABASE, "trivy", "trivy-db", optional=True,
-                              required_files=("trivy-java.db", "metadata.json"), target_subdir="java-db"),
+    "trivy-db": ToolSpec(
+        "trivy-db", DATABASE, "trivy", "trivy-db", required_files=("trivy.db", "metadata.json"), target_subdir="db"
+    ),
+    "trivy-java-db": ToolSpec(
+        "trivy-java-db",
+        DATABASE,
+        "trivy",
+        "trivy-db",
+        optional=True,
+        required_files=("trivy-java.db", "metadata.json"),
+        target_subdir="java-db",
+    ),
     "grype-db": ToolSpec("grype-db", DATABASE, "grype", "grype-db"),
 }
 

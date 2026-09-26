@@ -23,15 +23,17 @@ AGENTS.md
 # All of it is delivered by the Rotsy server at runtime; none of it is source.
 # (`data/` is the default data dir when running from a checkout.)
 # -----------------------------------------------------------------------------
-data/
+# Anchored to the repository root: an unanchored `tools/` would also match
+# src/rotsy_runner/tools/ — git honours a negation, but linters reading
+# .gitignore (ruff) do not, and would silently skip the tool manager.
+/data/
 /var/
-tools/
-!src/rotsy_runner/tools/
-downloads/
+/tools/
+/downloads/
 *.partial
 # Scanner binaries and database archives, if one is ever dropped in the tree.
-trivy
-grype
+/trivy
+/grype
 *.tar.gz
 *.tar.zst
 *.db
